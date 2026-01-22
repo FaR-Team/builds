@@ -1,87 +1,155 @@
-// Replace with your GitHub username and repo
 const GITHUB_USER = 'FaR-Team';
-const GITHUB_REPO = 'Project-FaR';
-const GITHUB_API = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/releases`;
 
-// Fetch releases from GitHub API
-async function fetchReleases() {
+const PROJECTS = [
+    {
+        id: 'farmoxel',
+        name: 'Within Reach',
+        repo: 'Project-FaR',
+        icon: 'fas fa-tractor',
+        description: 'A voxel-based farming simulator with unique gameplay mechanics.'
+    },
+    {
+        id: 'roommakers',
+        name: 'Room Makers',
+        repo: 'RoomMakers-Android',
+        icon: 'fas fa-couch',
+        description: 'Design and organize your dream rooms in this interactive builder.'
+    }
+];
+
+let currentProject = PROJECTS[0];
+
+function initApp() {
+    renderProjectSelector();
+    loadProject(currentProject.id);
+}
+
+function renderProjectSelector() {
+    const container = document.getElementById('project-selector');
+    if (!container) return;
+
+    container.innerHTML = PROJECTS.map(project => `
+        <button class="project-tab ${project.id === currentProject.id ? 'active' : ''}" 
+                onclick="switchProject('${project.id}')">
+            <i class="${project.icon}"></i> ${project.name}
+        </button>
+    `).join('');
+}
+
+window.switchProject = function (projectId) {
+    const newProject = PROJECTS.find(p => p.id === projectId);
+    if (!newProject || newProject.id === currentProject.id) return;
+
+    currentProject = newProject;
+
+    renderProjectSelector();
+
+    document.getElementById('total-downloads').textContent = '-';
+    document.getElementById('version-count').textContent = '-';
+    document.getElementById('latest-update').textContent = '-';
+
+    loadProject(projectId);
+};
+
+async function loadProject(projectId) {
+    const project = PROJECTS.find(p => p.id === projectId);
+    const api_url = `https://api.github.com/repos/${GITHUB_USER}/${project.repo}/releases`;
+
+    document.getElementById('latest-release-content').innerHTML =
+        `<div class="loading">Loading latest ${project.name} build</div>`;
+    document.getElementById('archive-content').innerHTML =
+        `<div class="loading">Loading build archive</div>`;
+
+    await fetchReleases(api_url);
+}
+
+async function fetchReleases(apiUrl) {
     try {
-        const response = await fetch(GITHUB_API);
+        const response = await fetch(apiUrl);
         if (!response.ok) {
             throw new Error(`GitHub API error: ${response.status}`);
         }
         const releases = await response.json();
-        
-        // Custom sorting for releases - Alphas from 0-0.97 first, then Betas
+
         releases.sort((a, b) => {
             const nameA = a.name || a.tag_name;
             const nameB = b.name || b.tag_name;
-            
-            // Check if Alpha or Beta
+
             const isAlphaA = nameA.toLowerCase().includes('alpha');
             const isAlphaB = nameB.toLowerCase().includes('alpha');
             const isBetaA = nameA.toLowerCase().includes('beta');
             const isBetaB = nameB.toLowerCase().includes('beta');
-            
-            // If both are Alpha or both are Beta, sort by version number
+
             if ((isAlphaA && isAlphaB) || (isBetaA && isBetaB)) {
-                // Extract version numbers if possible
                 const versionA = extractVersionNumber(nameA);
                 const versionB = extractVersionNumber(nameB);
                 if (versionA !== null && versionB !== null) {
-                    return versionB - versionA; // Newer versions first
+                    return compareVersions(versionB, versionA);
                 }
-                // Fall back to date sorting if version extraction fails
                 return new Date(b.published_at) - new Date(a.published_at);
             }
-            
-            // Beta comes after Alpha
+
             if (isAlphaA && isBetaB) return 1;
             if (isBetaA && isAlphaB) return -1;
-            
-            // Alphas first (in reverse order, so newer alphas appear first)
+
             if (isAlphaA) return 1;
             if (isAlphaB) return -1;
-            
-            // Default to date-based sorting for non-alpha/beta
+
             return new Date(b.published_at) - new Date(a.published_at);
         });
-        
+
+        calculateStatistics(releases);
         displayLatestRelease(releases[0]);
         displayReleaseArchive(releases);
+        setupVersionFilters(releases);
+
     } catch (error) {
         console.error('Error fetching releases:', error);
-        document.getElementById('latest-release-content').innerHTML = 
+        document.getElementById('latest-release-content').innerHTML =
             `<div class="error"><i class="fas fa-exclamation-circle"></i> Failed to load releases. ${error.message}</div>`;
-        document.getElementById('archive-content').innerHTML = 
+        document.getElementById('archive-content').innerHTML =
             `<div class="error"><i class="fas fa-exclamation-circle"></i> Failed to load releases. ${error.message}</div>`;
     }
 }
 
-// Extract date from release name and clean up the name
 function extractDateAndCleanName(releaseName) {
     const result = {
         name: releaseName,
         date: null
     };
-    
-    // Check if the release name contains a date in parentheses
+
     const dateMatch = releaseName.match(/\((\d{1,2}\/\d{1,2}\/\d{2,4})\)/);
     if (dateMatch && dateMatch[1]) {
-        // Extract the date
         result.date = dateMatch[1];
-        // Remove the date part from the name
         result.name = releaseName.replace(/\s*\(\d{1,2}\/\d{1,2}\/\d{2,4}\)/, '').trim();
     }
-    
+
     return result;
 }
 
-// Add this function to calculate statistics from releases
+function extractVersionNumber(name) {
+    const match = name.match(/(\d+(\.\d+)*)/);
+    if (match && match[1]) {
+        return match[1].split('.').map(part => parseInt(part, 10));
+    }
+    return null;
+}
+
+function compareVersions(versionA, versionB) {
+    for (let i = 0; i < Math.max(versionA.length, versionB.length); i++) {
+        const partA = i < versionA.length ? versionA[i] : 0;
+        const partB = i < versionB.length ? versionB[i] : 0;
+
+        if (partA > partB) return 1;
+        if (partA < partB) return -1;
+    }
+    return 0;
+}
+
+
 function calculateStatistics(releases) {
     if (!releases || releases.length === 0) return;
-    
-    // Calculate total downloads
+
     let totalDownloads = 0;
     releases.forEach(release => {
         if (release.assets && release.assets.length > 0) {
@@ -90,40 +158,36 @@ function calculateStatistics(releases) {
             });
         }
     });
-    
-    // Get version count
+
     const versionCount = releases.length;
-    
-    // Get latest update date
+
     const latestDate = new Date(releases[0].published_at);
     const formattedDate = latestDate.toLocaleDateString('en-US', {
-        month: 'short', 
-        day: 'numeric', 
+        month: 'short',
+        day: 'numeric',
         year: 'numeric'
     });
-    
-    // Update the DOM
+
     document.getElementById('total-downloads').textContent = totalDownloads.toLocaleString();
     document.getElementById('version-count').textContent = versionCount;
     document.getElementById('latest-update').textContent = formattedDate;
-    
-    // Add animations
+
     animateStatNumbers('total-downloads', totalDownloads);
     animateStatNumbers('version-count', versionCount);
 }
 
-// Add this function for number counter animation
 function animateStatNumbers(elementId, targetValue) {
     const element = document.getElementById(elementId);
-    const duration = 1500; // animation duration in ms
+    if (!element) return;
+
+    const duration = 1500;
     const startTime = performance.now();
     const startValue = 0;
-    
+
     function updateNumber(currentTime) {
         const elapsedTime = currentTime - startTime;
         if (elapsedTime < duration) {
             const progress = elapsedTime / duration;
-            // Use easeOutQuad for smoother animation
             const easeProgress = 1 - (1 - progress) * (1 - progress);
             const currentValue = Math.floor(startValue + easeProgress * (targetValue - startValue));
             element.textContent = currentValue.toLocaleString();
@@ -132,174 +196,29 @@ function animateStatNumbers(elementId, targetValue) {
             element.textContent = targetValue.toLocaleString();
         }
     }
-    
+
     requestAnimationFrame(updateNumber);
 }
 
-// Fetch releases from GitHub API
-async function fetchReleases() {
-    try {
-        const response = await fetch(GITHUB_API);
-        if (!response.ok) {
-            throw new Error(`GitHub API error: ${response.status}`);
-        }
-        const releases = await response.json();
-    
-        // Custom sorting for releases - Alphas from 0-0.97 first, then Betas
-        releases.sort((a, b) => {
-            const nameA = a.name || a.tag_name;
-            const nameB = b.name || b.tag_name;
-        
-            // Check if Alpha or Beta
-            const isAlphaA = nameA.toLowerCase().includes('alpha');
-            const isAlphaB = nameB.toLowerCase().includes('alpha');
-            const isBetaA = nameA.toLowerCase().includes('beta');
-            const isBetaB = nameB.toLowerCase().includes('beta');
-        
-            // If both are Alpha or both are Beta, sort by version number
-            if ((isAlphaA && isAlphaB) || (isBetaA && isBetaB)) {
-                // Extract version numbers if possible
-                const versionA = extractVersionNumber(nameA);
-                const versionB = extractVersionNumber(nameB);
-                if (versionA && versionB) {
-                    // Compare each part of the version number
-                    return compareVersions(versionB, versionA); // Newer versions first
-                }
-                // Fall back to date sorting if version extraction fails
-                return new Date(b.published_at) - new Date(a.published_at);
-            }
-        
-            // Beta comes after Alpha
-            if (isAlphaA && isBetaB) return 1;
-            if (isBetaA && isAlphaB) return -1;
-        
-            // Alphas first (in reverse order, so newer alphas appear first)
-            if (isAlphaA) return 1;
-            if (isAlphaB) return -1;
-        
-            // Default to date-based sorting for non-alpha/beta
-            return new Date(b.published_at) - new Date(a.published_at);
-        });
-    
-        // Calculate and display statistics
-        calculateStatistics(releases);
-        
-        // Display releases as before
-        displayLatestRelease(releases[0]);
-        displayReleaseArchive(releases);
-        
-        // Set up version filters if they exist
-        setupVersionFilters(releases);
-        
-    } catch (error) {
-        console.error('Error fetching releases:', error);
-        document.getElementById('total-downloads').textContent = 'N/A';
-        document.getElementById('version-count').textContent = 'N/A';
-        document.getElementById('latest-update').textContent = 'N/A';
-        
-        document.getElementById('latest-release-content').innerHTML = 
-            `<div class="error"><i class="fas fa-exclamation-circle"></i> Failed to load releases. ${error.message}</div>`;
-        document.getElementById('archive-content').innerHTML = 
-            `<div class="error"><i class="fas fa-exclamation-circle"></i> Failed to load releases. ${error.message}</div>`;
-    }
-}
-
-// Add this function for version filtering
-function setupVersionFilters(releases) {
-    const filterButtons = document.querySelectorAll('.filter-btn');
-    if (!filterButtons.length) return;
-    
-    filterButtons.forEach(button => {
-        button.addEventListener('click', () => {
-            // Update active button
-            filterButtons.forEach(btn => btn.classList.remove('active'));
-            button.classList.add('active');
-            
-            const filter = button.getAttribute('data-filter');
-            
-            // Filter releases
-            let filteredReleases;
-            if (filter === 'all') {
-                filteredReleases = releases;
-            } else {
-                filteredReleases = releases.filter(release => {
-                    const name = (release.name || release.tag_name).toLowerCase();
-                    return name.includes(filter.toLowerCase());
-                });
-            }
-            
-            // Re-display filtered releases
-            displayReleaseArchive(filteredReleases);
-        });
-    });
-}// Extract date from release name and clean up the name
-function extractDateAndCleanName(releaseName) {
-    const result = {
-        name: releaseName,
-        date: null
-    };
-
-    // Check if the release name contains a date in parentheses
-    const dateMatch = releaseName.match(/\((\d{1,2}\/\d{1,2}\/\d{2,4})\)/);
-    if (dateMatch && dateMatch[1]) {
-        // Extract the date
-        result.date = dateMatch[1];
-        // Remove the date part from the name
-        result.name = releaseName.replace(/\s*\(\d{1,2}\/\d{1,2}\/\d{2,4}\)/, '').trim();
-    }
-
-    return result;
-}
-
-// Extract version number from a release name as an array of numbers
-function extractVersionNumber(name) {
-    const match = name.match(/(\d+(\.\d+)*)/);
-    if (match && match[1]) {
-        // Split by dots and convert each part to a number
-        return match[1].split('.').map(part => parseInt(part, 10));
-    }
-    return null;
-}
-
-// Compare two version arrays (e.g. [0,0,36] > [0,0,34])
-function compareVersions(versionA, versionB) {
-    // Compare each segment of the version number
-    for (let i = 0; i < Math.max(versionA.length, versionB.length); i++) {
-        // If versionA doesn't have this segment, treat as 0
-        const partA = i < versionA.length ? versionA[i] : 0;
-        // If versionB doesn't have this segment, treat as 0
-        const partB = i < versionB.length ? versionB[i] : 0;
-    
-        if (partA > partB) return 1;  // versionA is greater
-        if (partA < partB) return -1; // versionB is greater
-    }
-    return 0; // versions are equal
-}
-
-// Display the latest release
 function displayLatestRelease(release) {
     if (!release) {
-        document.getElementById('latest-release-content').innerHTML = 
+        document.getElementById('latest-release-content').innerHTML =
             '<div class="error"><i class="fas fa-exclamation-circle"></i> No releases found.</div>';
         return;
     }
 
-    // Process release name and extract date if present
     const originalName = release.name || `v${release.tag_name}`;
     const { name: cleanName, date: extractedDate } = extractDateAndCleanName(originalName);
-    
-    // Use extracted date if available, otherwise use the published date
+
     const releaseDate = extractedDate || new Date(release.published_at).toLocaleDateString();
-    
+
     let mainAsset = null;
-    
-    // Find the main asset (assuming it's the first or looking for specific file extensions)
+
     if (release.assets && release.assets.length > 0) {
-        mainAsset = release.assets[0]; // Default to first asset
-        
-        // Optionally prioritize specific file types
+        mainAsset = release.assets[0];
+
         for (const asset of release.assets) {
-            if (asset.name.endsWith('.zip') || asset.name.endsWith('.exe')) {
+            if (asset.name.endsWith('.zip') || asset.name.endsWith('.exe') || asset.name.endsWith('.apk')) {
                 mainAsset = asset;
                 break;
             }
@@ -333,29 +252,25 @@ function displayLatestRelease(release) {
     document.getElementById('latest-release-content').innerHTML = html;
 }
 
-// Display archive of previous releases
 function displayReleaseArchive(releases) {
     if (!releases || releases.length === 0) {
-        document.getElementById('archive-content').innerHTML = 
+        document.getElementById('archive-content').innerHTML =
             '<div class="error"><i class="fas fa-exclamation-circle"></i> No releases found.</div>';
         return;
     }
 
     let html = '<ul class="release-list">';
-    
-    // Skip the first release if there are more than one (as it's already displayed as latest)
+
     const startIndex = releases.length > 1 ? 1 : 0;
-    
+
     for (let i = startIndex; i < releases.length; i++) {
         const release = releases[i];
-        
-        // Process release name and extract date if present
+
         const originalName = release.name || `v${release.tag_name}`;
         const { name: cleanName, date: extractedDate } = extractDateAndCleanName(originalName);
-        
-        // Use extracted date if available, otherwise use the published date
+
         const releaseDate = extractedDate || new Date(release.published_at).toLocaleDateString();
-        
+
         let mainAsset = null;
         if (release.assets && release.assets.length > 0) {
             mainAsset = release.assets[0];
@@ -384,7 +299,40 @@ function displayReleaseArchive(releases) {
     document.getElementById('archive-content').innerHTML = html;
 }
 
-// Format file size to human-readable format
+
+function setupVersionFilters(releases) {
+    const filterButtons = document.querySelectorAll('.filter-btn');
+    if (!filterButtons.length) return;
+
+    filterButtons.forEach(button => {
+        const newButton = button.cloneNode(true);
+        button.parentNode.replaceChild(newButton, button);
+    });
+
+    const newFilterButtons = document.querySelectorAll('.filter-btn');
+
+    newFilterButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            newFilterButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+
+            const filter = button.getAttribute('data-filter');
+
+            let filteredReleases;
+            if (filter === 'all') {
+                filteredReleases = releases;
+            } else {
+                filteredReleases = releases.filter(release => {
+                    const name = (release.name || release.tag_name).toLowerCase();
+                    return name.includes(filter.toLowerCase());
+                });
+            }
+
+            displayReleaseArchive(filteredReleases);
+        });
+    });
+}
+
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -393,7 +341,6 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// Format release notes (simple conversion of markdown line breaks to HTML)
 function formatReleaseNotes(notes) {
     if (!notes) return '';
     return notes
@@ -401,5 +348,5 @@ function formatReleaseNotes(notes) {
         .replace(/\n/g, '<br>');
 }
 
-// Load releases when the page loads
-document.addEventListener('DOMContentLoaded', fetchReleases);
+document.addEventListener('DOMContentLoaded', initApp);
+
